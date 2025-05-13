@@ -163,7 +163,7 @@ def walk_forward_train_cmf(
             break
     
     # Save the final scaler so we can transform features during inference
-    scaler_filename = f"models/scaler_cmf{cmf_id}.pkl"
+    scaler_filename = f"vix_pkg/models/scaler_cmf{cmf_id}.pkl"
     with open(scaler_filename, "wb") as f:
         pickle.dump(scaler, f)
 
@@ -267,7 +267,7 @@ def train_six_cmf_models(data_file):
         merged_results.append(oos_df)
 
         # Save the trained model
-        model_filename = f"models/model_cmf{i}.pkl"
+        model_filename = f"vix_pkg/models/model_cmf{i}.pkl"
         with open(model_filename, "wb") as f:
             pickle.dump(model, f)
 
@@ -298,13 +298,7 @@ def train_six_cmf_models(data_file):
         
 
     # Save
-    merged_df.to_excel("data/all_cmfs_oos_predictions.xlsx", index=False)
+    merged_df.to_excel("vix_pkg/data/all_cmfs_oos_predictions.xlsx", index=False)
     print("Saved combined day-by-day OOS to all_cmfs_oos_predictions.xlsx")
 
     return final_df
-
-
-if __name__ == "__main__":
-    final_preds = train_six_cmf_models("data/vix_features_calculated.xlsx")
-    print("Final shape:", final_preds.shape)
-    print(final_preds.head(10))
