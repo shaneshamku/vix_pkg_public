@@ -109,15 +109,6 @@ def close_positions(new_portfolio_df):
 
 
 
-def send_weekly_basket():
-    pf = get_account_info()
-    lookback = 22
-    winners_from_low_vol, losers_from_high_vol, low_vol_from_winners, high_vol_from_losers = calculate_portfolios(lookback, pf)
-    close_positions(winners_from_low_vol)
-    place_orders(winners_from_low_vol, 'long')
-
-
-
 def send_daily_orders(df):
     long_df = pd.DataFrame({
     'Symbol': df['Top_ETF'].values,
