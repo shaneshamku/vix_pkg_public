@@ -103,6 +103,4 @@ def calculate_features():
     # drop rows with nan (first and last row)
     df.dropna(inplace=True)
 
-    print(df.columns)
-    exit()
     df.to_excel("vix_pkg/data/vix_features_calculated.xlsx", index=False)
