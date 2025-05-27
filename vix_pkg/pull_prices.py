@@ -42,37 +42,36 @@ def AppendNewClosePrice():
 
 
     # Get last date in dataframe
-    # last_pulled_date = pd.Timestamp(vix_prices['Date'].iloc[0]).date()
+    last_pulled_date = pd.Timestamp(vix_prices['Date'].iloc[0]).date()
 
-    # # Compare with today's date
-    # if date.today() > last_pulled_date:
-    #     tickers = ['^SPVIX2ME','^SPVIX3ME','^SPVIX4ME','^SPVIX6ME','^SPVXMP','^SPVXSP',"SPY", 'TLT', '^VIX']
+    # Compare with today's date
+    if date.today() > last_pulled_date:
+        tickers = ['^SPVIX2ME','^SPVIX3ME','^SPVIX4ME','^SPVIX6ME','^SPVXMP','^SPVXSP',"SPY", 'TLT', '^VIX']
         
-    #     latest_prices = {}
+        latest_prices = {}
 
-    #     for ticker in tickers:
-    #         try:
-    #             data = yf.Ticker(ticker).history(period='1d')
-    #             if not data.empty:
-    #                 latest_prices[ticker] = data['Close'].iloc[0]
-    #             else:
-    #                 latest_prices[ticker] = None
-    #         except Exception as e:
-    #             latest_prices[ticker] = None
-    #             print(f"Error fetching {ticker}: {e}")
+        for ticker in tickers:
+            try:
+                data = yf.Ticker(ticker).history(period='1d')
+                if not data.empty:
+                    latest_prices[ticker] = data['Close'].iloc[0]
+                else:
+                    latest_prices[ticker] = None
+            except Exception as e:
+                latest_prices[ticker] = None
+                print(f"Error fetching {ticker}: {e}")
 
-    #     # Create new row with today's date and fetched prices
-    #     new_row = {'Date': date.today()}
-    #     for ticker, price in latest_prices.items():
-    #         new_row[ticker] = price
+        # Create new row with today's date and fetched prices
+        new_row = {'Date': date.today()}
+        for ticker, price in latest_prices.items():
+            new_row[ticker] = price
 
-    #     newData = pd.DataFrame([new_row])
+        newData = pd.DataFrame([new_row])
 
-    # else:
-    #     print(f"Data is up to date as of {last_pulled_date}")
+    else:
+        print(f"Data is up to date as of {last_pulled_date}")
 
-    # newData.to_pickle('newData.pkl')
-    newData = pd.read_pickle('newData.pkl')
+
     # reformat pulled data to properly merge with old data
     newData.columns = [x.replace("^", "") for x in newData.columns]
     newData  = newData.rename(columns={'TLT':"TLT US Equity", "VIX": "VIX Index", "SPY": "SPX"})
