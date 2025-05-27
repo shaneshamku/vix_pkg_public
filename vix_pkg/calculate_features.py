@@ -14,7 +14,7 @@ def calculate_features():
     # Rename columns for simplicity
     df.rename(columns={
         'SPVIX2ME': 'CMF2', 'SPVIX3ME': 'CMF3', 'SPVIX4ME': 'CMF4',
-        'SPVIX6ME': 'CMF6', 'SPVXMP': 'CMF5', 'SPVSP': 'CMF1'
+        'SPVIX6ME': 'CMF6', 'SPVXMP': 'CMF5', 'SPVXSP': 'CMF1'
     }, inplace=True)
 
 
