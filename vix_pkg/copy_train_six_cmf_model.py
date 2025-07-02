@@ -55,7 +55,7 @@ def walk_forward_train_cmf(
     final_date = df_sorted[date_col].max()
     
     # Initialize a single model with warm_start
-    model = ElasticNet(alpha=0.001,
+    model = ElasticNet(alpha=0.01,
                        l1_ratio=0.5,      # Lasso-like
                        warm_start=True,
                        max_iter=1000,
@@ -108,6 +108,15 @@ def walk_forward_train_cmf(
         y_train = df_train[target_col].values
         X_val   = df_val[feature_cols].values
         y_val   = df_val[target_col].values
+
+        # NEW — drop rows that still contain NaNs (lagged-feature bleed)
+        train_mask = ~np.isnan(X_train).any(axis=1)
+        X_train    = X_train[train_mask]
+        y_train    = y_train[train_mask]
+
+        val_mask   = ~np.isnan(X_val).any(axis=1)
+        X_val      = X_val[val_mask]
+        y_val      = y_val[val_mask]
 
        
          
@@ -205,12 +214,31 @@ def train_six_cmf_models(data_file):
     df = pd.read_excel(data_file, parse_dates=["Date"])
     df.sort_values("Date", inplace=True)
 
-    
-
-    # 1) Next-day log returns
+    # ----------------- 0️⃣  create next-day targets  ------------------
     for i in range(1, 7):
         df[f"target_{i}"] = np.log(df[f"CMF{i}"].shift(-1) / df[f"CMF{i}"])
+    # -----------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # STEP 1  & STEP 2  –  build safe, after-close features
+    # ------------------------------------------------------------------
+    # 1️⃣  One-day-lag CMF levels  (we trade next-day, so Lag1 is 100 % safe)
+    for i in range(1, 7):
+        df[f"CMF{i}_Lag1"] = df[f"CMF{i}"].shift(1)
+
+    # 2️⃣  Term-structure features based on *lagged* levels
+    #     You can keep   Delta_Roll_k   OR   Pct_Roll_k   (or both).
+    for k in (2, 3, 4, 5, 6):
+        df[f"Delta_Roll_{k}"] = df["CMF1_Lag1"] - df[f"CMF{k}_Lag1"]
+        df[f"Pct_Roll_{k}"]   = df[f"CMF{k}_Lag1"] / df["CMF1_Lag1"] - 1
+
+    # 3️⃣  Drop same-day CMF levels – they would leak today’s hierarchy
+    raw_cmf_cols = [c for c in df.columns if c.startswith("CMF") and len(c) == 4]
+    df.drop(columns=raw_cmf_cols, inplace=True)
+    # ------------------------------------------------------------------
+    
+
+    
     # --------------------------------------------------------------
     #   Leak scan & one-shot drop
     # --------------------------------------------------------------
@@ -229,65 +257,43 @@ def train_six_cmf_models(data_file):
         df.drop(columns=leak_cols, inplace=True)
     # --------------------------------------------------------------
     # --------------------------------------------------------------
-    # 1️⃣  Make 1-day-lagged CMF levels  (past information only)
-    # --------------------------------------------------------------
-    for i in range(1, 7):
-        df[f"CMF{i}_Lag1"] = df[f"CMF{i}"].shift(1)
+   
 
-    # --------------------------------------------------------------
-
-    # 1️⃣-b  Build percentage-roll features & drop old Delta_Roll_*
-    # --------------------------------------------------------------
-    for k in (2, 3, 4, 5, 6):
-        # % difference of each lag-1 CMF versus front month lag-1
-        df[f"Pct_Roll_{k}"] = df[f"CMF{k}_Lag1"] / df["CMF1_Lag1"] - 1
-
-    # Old Delta_Roll_* columns bake in the fixed hierarchy; remove them
-    df.drop(
-        columns=[c for c in df.columns if c.startswith("Delta_Roll_")],
-        inplace=True,
-        errors="ignore",
-    )
-    # --------------------------------------------------------------
-
-    # --------------------------------------------------------------
-    # 2️⃣  Drop today’s raw CMF levels  (they bake in the hierarchy)
-    # --------------------------------------------------------------
-    raw_cmf_cols = [c for c in df.columns if c.startswith("CMF") and len(c) == 4]
-    print("🚫  Dropping raw CMF level cols:", raw_cmf_cols)
-    df.drop(columns=raw_cmf_cols, inplace=True)
-    # ---------------------------------------------------------------
-
-
+    
     # # Compute feature correlations
     # correlation_matrix = df.corr()
     # print("Feature Correlation Matrix:\n", correlation_matrix)
     
-    # Define feature sets for each CMF. Modify these arrays as needed.
-    # features_cmf1 = ["CMF1_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
-    # features_cmf2 = ["CMF2_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
-    # features_cmf3 = ["CMF3_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
-    # features_cmf4 = ["CMF4_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
-    # features_cmf5 = ["CMF5_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
-    # features_cmf6 = ["CMF6_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
-    features_cmf1 = ["CMF1_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-                 "TLT US Equity", "deltalag_CMF1_02"]
-    features_cmf2 = ["CMF2_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-                    "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-                    "TLT US Equity", "deltalag_CMF2_02"]
-    features_cmf3 = ["CMF3_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-                    "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-                    "TLT US Equity", "deltalag_CMF3_02"]
-    features_cmf4 = ["CMF4_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-                    "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-                    "TLT US Equity", "deltalag_CMF4_02"]
-    features_cmf5 = ["CMF5_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-                    "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-                    "TLT US Equity", "deltalag_CMF5_02"]
-    features_cmf6 = ["CMF6_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-                    "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-                    "TLT US Equity", "deltalag_CMF6_02"]
+    features_cmf1 = ["CMF1_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
+    features_cmf2 = ["CMF2_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
+    features_cmf3 = ["CMF3_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
+    features_cmf4 = ["CMF4_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
+    features_cmf5 = ["CMF5_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
+    features_cmf6 = ["CMF6_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
+    
+    # features_cmf1 = ["CMF1_Lag1", "Pct_Roll_3", "Pct_Roll_4",
+    #              "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
+    #              "TLT US Equity", "deltalag_CMF1_02"]
+    # features_cmf2 = ["CMF2_Lag1", "Pct_Roll_3", "Pct_Roll_4",
+    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
+    #                 "TLT US Equity", "deltalag_CMF2_02"]
+    # features_cmf3 = ["CMF3_Lag1", "Pct_Roll_3", "Pct_Roll_4",
+    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
+    #                 "TLT US Equity", "deltalag_CMF3_02"]
+    # features_cmf4 = ["CMF4_Lag1", "Pct_Roll_3", "Pct_Roll_4",
+    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
+    #                 "TLT US Equity", "deltalag_CMF4_02"]
+    # features_cmf5 = ["CMF5_Lag1", "Pct_Roll_3", "Pct_Roll_4",
+    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
+    #                 "TLT US Equity", "deltalag_CMF5_02"]
+    # features_cmf6 = ["CMF6_Lag1", "Pct_Roll_3", "Pct_Roll_4",
+    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
+    #                 "TLT US Equity", "deltalag_CMF6_02"]
+
+    # ------------------------------------------------------------------
+    # SAFE, after-close feature sets  (Lag-1 CMF level + curve shape)
+    # ------------------------------------------------------------------
+    
     
     # Create a mapping from CMF number to its feature set.
     features_by_cmf = {
@@ -327,7 +333,7 @@ def train_six_cmf_models(data_file):
             feature_cols=feature_cols,
             cmf_id=i,
             date_col="Date",
-            train_start_date=pd.Timestamp("2018-01-01"),
+            train_start_date=pd.Timestamp("2005-01-01"),
             train_length_months=54, # 4.5 years
             val_length_months=6,
             test_length_months=6
@@ -353,6 +359,15 @@ def train_six_cmf_models(data_file):
     )
     final_df.sort_values(["FoldID", "Date"], inplace=True)
     final_df.reset_index(drop=True, inplace=True)
+
+    # --------------------------------------------------------------
+    #  OOS coverage sanity-check
+    # --------------------------------------------------------------
+    print(
+        "OOS date range:",
+        final_df["Date"].min().date(), "→", final_df["Date"].max().date(),
+        f"({len(final_df):,} rows)")
+    # --------------------------------------------------------------
 
     # ----- QUICK DUPLICATE-COLUMN / NAN SCAN -------------------------
     dup_cols = [c for c in final_df.columns if c.endswith(("_x", "_y"))]
