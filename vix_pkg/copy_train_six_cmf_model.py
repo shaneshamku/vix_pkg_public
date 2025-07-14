@@ -109,7 +109,7 @@ def walk_forward_train_cmf(
         X_val   = df_val[feature_cols].values
         y_val   = df_val[target_col].values
 
-        # NEW — drop rows that still contain NaNs (lagged-feature bleed)
+        # drop rows that still contain NaNs (lagged-feature bleed)
         train_mask = ~np.isnan(X_train).any(axis=1)
         X_train    = X_train[train_mask]
         y_train    = y_train[train_mask]
@@ -214,34 +214,32 @@ def train_six_cmf_models(data_file):
     df = pd.read_excel(data_file, parse_dates=["Date"])
     df.sort_values("Date", inplace=True)
 
-    # ----------------- 0️⃣  create next-day targets  ------------------
+    # 0. create next-day targets 
     for i in range(1, 7):
         df[f"target_{i}"] = np.log(df[f"CMF{i}"].shift(-1) / df[f"CMF{i}"])
-    # -----------------------------------------------------------------
 
-    # ------------------------------------------------------------------
-    # STEP 1  & STEP 2  –  build safe, after-close features
-    # ------------------------------------------------------------------
-    # 1️⃣  One-day-lag CMF levels  (we trade next-day, so Lag1 is 100 % safe)
+    
+    # 1. and 2.  build safe, after-close features
+    # 1. One-day-lag CMF levels  (we trade next-day, so Lag1 is 100 % safe)
+    # For June 6 EOD trade, use June 5 row data because otherwise June 6 row data is being fed into the target and also trained on (atp we are measuring math rather than market skill)
     for i in range(1, 7):
         df[f"CMF{i}_Lag1"] = df[f"CMF{i}"].shift(1)
 
-    # 2️⃣  Term-structure features based on *lagged* levels
-    #     You can keep   Delta_Roll_k   OR   Pct_Roll_k   (or both).
+    # 2. Term-structure features based on *lagged* levels
     for k in (2, 3, 4, 5, 6):
         df[f"Delta_Roll_{k}"] = df["CMF1_Lag1"] - df[f"CMF{k}_Lag1"]
         df[f"Pct_Roll_{k}"]   = df[f"CMF{k}_Lag1"] / df["CMF1_Lag1"] - 1
 
-    # 3️⃣  Drop same-day CMF levels – they would leak today’s hierarchy
+    # 3. Drop same-day CMF levels – they would leak today’s hierarchy
+    # original CMF1-6 columns leak the intraday hierachy
+    # If the model is allowed to see today’s close CMF𝑡 and the target label’s denominator also contains CMF𝑡, a linear model can “solve the fraction” instead of learning market structure
     raw_cmf_cols = [c for c in df.columns if c.startswith("CMF") and len(c) == 4]
     df.drop(columns=raw_cmf_cols, inplace=True)
-    # ------------------------------------------------------------------
     
 
-    
     # --------------------------------------------------------------
-    #   Leak scan & one-shot drop
-    # --------------------------------------------------------------
+    # Leak scan & one-shot drop
+    # drop columns that have a suspisiously high correlation with the target columns (arithmetic echoes, forward filled data)
     target_next = df["target_1"].copy()     # keep a reference BEFORE we drop it
 
     leak_cols = []
@@ -256,13 +254,7 @@ def train_six_cmf_models(data_file):
         print("🚫  Dropping leaky columns:", leak_cols)
         df.drop(columns=leak_cols, inplace=True)
     # --------------------------------------------------------------
-    # --------------------------------------------------------------
-   
-
     
-    # # Compute feature correlations
-    # correlation_matrix = df.corr()
-    # print("Feature Correlation Matrix:\n", correlation_matrix)
     
     features_cmf1 = ["CMF1_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
     features_cmf2 = ["CMF2_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
@@ -270,29 +262,6 @@ def train_six_cmf_models(data_file):
     features_cmf4 = ["CMF4_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
     features_cmf5 = ["CMF5_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
     features_cmf6 = ["CMF6_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
-    
-    # features_cmf1 = ["CMF1_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-    #              "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-    #              "TLT US Equity", "deltalag_CMF1_02"]
-    # features_cmf2 = ["CMF2_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-    #                 "TLT US Equity", "deltalag_CMF2_02"]
-    # features_cmf3 = ["CMF3_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-    #                 "TLT US Equity", "deltalag_CMF3_02"]
-    # features_cmf4 = ["CMF4_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-    #                 "TLT US Equity", "deltalag_CMF4_02"]
-    # features_cmf5 = ["CMF5_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-    #                 "TLT US Equity", "deltalag_CMF5_02"]
-    # features_cmf6 = ["CMF6_Lag1", "Pct_Roll_3", "Pct_Roll_4",
-    #                 "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2",
-    #                 "TLT US Equity", "deltalag_CMF6_02"]
-
-    # ------------------------------------------------------------------
-    # SAFE, after-close feature sets  (Lag-1 CMF level + curve shape)
-    # ------------------------------------------------------------------
     
     
     # Create a mapping from CMF number to its feature set.
@@ -305,16 +274,8 @@ def train_six_cmf_models(data_file):
         6: features_cmf6
     }
 
-    # 2) Correlation-based feature selection
-    # Pick top 10 correlated features with the target_i
-    # (excluding the target itself and the Date column)
-    all_columns = df.columns.tolist()
-    # Store the final selected features in this dict
-    
-    selection_records = []
 
-
-    # 3) Train a model for each CMF using its selected features
+    # 4. Train a model for each CMF using its selected features
     merged_results = []
     for i in range(1, 7):
         feature_cols = features_by_cmf[i]
@@ -348,7 +309,7 @@ def train_six_cmf_models(data_file):
         print(f"CMF{i} -> Final RMSE: {rmse:.6f}, IC: {ic:.4f}")
         print(f"Saved model for CMF{i} to {model_filename}")     
 
-    # 4) Merge all CMFs' OOS data
+    # 5. Merge all CMFs' OOS data
     if len(merged_results) == 0:
         print("No OOS results for any CMF.")
         return pd.DataFrame()
@@ -360,44 +321,46 @@ def train_six_cmf_models(data_file):
     final_df.sort_values(["FoldID", "Date"], inplace=True)
     final_df.reset_index(drop=True, inplace=True)
 
-    # --------------------------------------------------------------
     #  OOS coverage sanity-check
-    # --------------------------------------------------------------
+    # (e.g., 2010-01-01 → 2025-01-30)
+    # Confirms that every CMF model produced predictions for the period we expect, If the start date is much later than the raw file suggests, something upstream is still filtering data away.
     print(
         "OOS date range:",
         final_df["Date"].min().date(), "→", final_df["Date"].max().date(),
         f"({len(final_df):,} rows)")
-    # --------------------------------------------------------------
 
-    # ----- QUICK DUPLICATE-COLUMN / NAN SCAN -------------------------
+    #  DUPLICATE-COLUMN / NAN SCAN 
     dup_cols = [c for c in final_df.columns if c.endswith(("_x", "_y"))]
     if dup_cols:
         print("⚠️  Duplicate columns created by outer-merge:", dup_cols)
 
     # Every date should have *exactly one* row per CMF in each fold;
     # if NaNs appear here, the outer merge was sparse.
+    # Computes the percentage of missing values in every column, then prints only those ≥ 10 %
     nan_frac = final_df.isna().mean().round(3)
     print("Fraction NaNs per column ≥0.10:\n",
           nan_frac[nan_frac >= 0.10])
-    # -----------------------------------------------------------------
 
-    # ---------- NEW BLOCK: daily cross-sectional rank-IC + sanity checks ---------- #
-    # 1) Reshape to long form  ➜  Date | CMF_ID | Act | Pred
+    # Reshape to long form  ➜  Date | CMF_ID | Act | Pred
     act_cols  = [f"Act_CMF{i}"  for i in range(1, 7)]
     pred_cols = [f"Pred_CMF{i}" for i in range(1, 7)]
 
+    # melted the six Act columns into one numeric column (Act) plus a categorical identifier CMF_ID telling which maturity bucket (1…6) the row belongs to
     long_act = (
         final_df.melt(id_vars=["Date"], value_vars=act_cols,
                       var_name="tmp", value_name="Act")
                 .assign(CMF_ID=lambda x: x["tmp"].str.extract(r"(\d+)").astype(int))
                 .drop(columns="tmp")
     )
+
+    # melted the six Act columns into one numeric column (Act) plus a categorical identifier CMF_ID telling which maturity bucket (1…6) the row belongs to
     long_pred = (
         final_df.melt(id_vars=["Date"], value_vars=pred_cols,
                       var_name="tmp", value_name="Pred")
                 .assign(CMF_ID=lambda x: x["tmp"].str.extract(r"(\d+)").astype(int))
                 .drop(columns="tmp")
     )
+
     long_df = long_act.merge(long_pred, on=["Date", "CMF_ID"])
 
     # ----- ROW-COUNT & GLOBAL CORRELATION CHECK ----------------------
@@ -409,6 +372,11 @@ def train_six_cmf_models(data_file):
     # ----------------------------------------------------------------
 
     # 2) Main metric  –  daily Spearman rank-IC across the six CMFs
+    # For each trading day:
+    # Rank the six CMFs by predicted return (g["Pred"].rank()).
+    # Rank them by their realised return (g["Act"].rank()).
+    # Compute the Spearman (rank) correlation between those two 6-element rank vectors.
+
     daily_cs_ic = (
         long_df.groupby("Date", group_keys=False)      # <-- avoids future-pandas warning
                .apply(lambda g: g["Pred"].rank()
@@ -420,12 +388,15 @@ def train_six_cmf_models(data_file):
 
     print(f"\nCross-sectional IC (OOS): {cs_ic_mean:.3f}  "
           f"(t = {cs_ic_t:.2f}, N = {len(daily_cs_ic)})")
-
+    #  Cross-sectional IC (OOS): 0.164  (t = 11.98, N = 3792)
+    
     # ---------------------------------------------------------------------------
     # 3) QUICK SANITY TESTS  –  baseline, shuffle, 1-day shift
     # ---------------------------------------------------------------------------
 
     # A) Naïve baseline: rank by yesterday’s return only
+    # If I simply ranked contracts by yesterday’s performance, how much of today’s hierarchy would I already capture?
+    # Serves as a low benchmark your model should beat.
     long_df["Act_lag1"] = long_df.groupby("CMF_ID")["Act"].shift(1)
 
     baseline_ic = (
