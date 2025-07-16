@@ -44,7 +44,7 @@ def apply_scaled_drawdown_constraint(weights: pd.DataFrame,
 
 
 # load & merge
-PRED_FILE  = Path("vix_pkg/data/all_cmfs_oos_predictions_old.xlsx")
+PRED_FILE  = Path("vix_pkg/data/all_cmfs_oos_predictions.xlsx")
 PRICE_FILE = Path("vix_pkg/data/vixprices.xlsx")
 
 pred   = pd.read_excel(PRED_FILE,  parse_dates=["Date"])

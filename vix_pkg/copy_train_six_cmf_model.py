@@ -55,7 +55,7 @@ def walk_forward_train_cmf(
     final_date = df_sorted[date_col].max()
     
     # Initialize a single model with warm_start
-    model = ElasticNet(alpha=0.01,
+    model = ElasticNet(alpha=0.001,
                        l1_ratio=0.5,      # Lasso-like
                        warm_start=True,
                        max_iter=1000,
@@ -219,28 +219,40 @@ def train_six_cmf_models(data_file):
         df[f"target_{i}"] = np.log(df[f"CMF{i}"].shift(-1) / df[f"CMF{i}"])
 
     
+    # -------------------------------------------------------------------------------------------------------
+    # THIS BLOCK CAN BE IGNORED IF WE ARE USING THE CURRENT DAY CMF FOR PREDICTIONS
+    # THIS BLOCK WILL CREATE A 1 DAY LAG AND USE YESTERDAYS CMF FOR PREDICTIONS
+    # -------------------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------------------------
     # 1. and 2.  build safe, after-close features
     # 1. One-day-lag CMF levels  (we trade next-day, so Lag1 is 100 % safe)
     # For June 6 EOD trade, use June 5 row data because otherwise June 6 row data is being fed into the target and also trained on (atp we are measuring math rather than market skill)
     for i in range(1, 7):
         df[f"CMF{i}_Lag1"] = df[f"CMF{i}"].shift(1)
 
-    # 2. Term-structure features based on *lagged* levels
-    for k in (2, 3, 4, 5, 6):
-        df[f"Delta_Roll_{k}"] = df["CMF1_Lag1"] - df[f"CMF{k}_Lag1"]
-        df[f"Pct_Roll_{k}"]   = df[f"CMF{k}_Lag1"] / df["CMF1_Lag1"] - 1
 
-    # 3. Drop same-day CMF levels – they would leak today’s hierarchy
-    # original CMF1-6 columns leak the intraday hierachy
-    # If the model is allowed to see today’s close CMF𝑡 and the target label’s denominator also contains CMF𝑡, a linear model can “solve the fraction” instead of learning market structure
-    raw_cmf_cols = [c for c in df.columns if c.startswith("CMF") and len(c) == 4]
-    df.drop(columns=raw_cmf_cols, inplace=True)
-    
+    # # 2. Term-structure features based on *lagged* levels
+    # for k in (2, 3, 4, 5, 6):
+    #     df[f"Delta_Roll_{k}"] = df["CMF1_Lag1"] - df[f"CMF{k}_Lag1"]
+    #     df[f"Pct_Roll_{k}"]   = df[f"CMF{k}_Lag1"] / df["CMF1_Lag1"] - 1
+
+    # # 3. Drop same-day CMF levels – they would leak today’s hierarchy
+    # # original CMF1-6 columns leak the intraday hierachy
+    # # If the model is allowed to see today’s close CMF𝑡 and the target label’s denominator also contains CMF𝑡, a linear model can “solve the fraction” instead of learning market structure
+    # raw_cmf_cols = [c for c in df.columns if c.startswith("CMF") and len(c) == 4]
+    # df.drop(columns=raw_cmf_cols, inplace=True)
+    # -------------------------------------------------------------------------------------------------------
+
 
     # --------------------------------------------------------------
     # Leak scan & one-shot drop
     # drop columns that have a suspisiously high correlation with the target columns (arithmetic echoes, forward filled data)
     target_next = df["target_1"].copy()     # keep a reference BEFORE we drop it
+    target_next2 = df["target_2"].copy()
+    target_next3 = df["target_3"].copy()
+    target_next4 = df["target_4"].copy()
+    target_next5 = df["target_5"].copy()
+    target_next6 = df["target_6"].copy()
 
     leak_cols = []
     for col in df.columns:
@@ -249,21 +261,45 @@ def train_six_cmf_models(data_file):
         # >>> use target_next here – NOT df["target_1"] <<<
         if abs(df[col].corr(target_next)) > 0.95:
             leak_cols.append(col)
+        
 
     if leak_cols:
         print("🚫  Dropping leaky columns:", leak_cols)
         df.drop(columns=leak_cols, inplace=True)
     # --------------------------------------------------------------
     
+    # # using lagged CMF and delta roll
+    # features_cmf1 = ["CMF1_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
+    # features_cmf2 = ["CMF2_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
+    # features_cmf3 = ["CMF3_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
+    # features_cmf4 = ["CMF4_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
+    # features_cmf5 = ["CMF5_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
+    # features_cmf6 = ["CMF6_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
+
+    # # using lagged CMF and pct roll
+    # features_cmf1 = ["CMF1_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
+    # features_cmf2 = ["CMF2_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
+    # features_cmf3 = ["CMF3_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
+    # features_cmf4 = ["CMF4_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
+    # features_cmf5 = ["CMF5_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
+    # features_cmf6 = ["CMF6_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
     
-    features_cmf1 = ["CMF1_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
-    features_cmf2 = ["CMF2_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
-    features_cmf3 = ["CMF3_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
-    features_cmf4 = ["CMF4_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
-    features_cmf5 = ["CMF5_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
-    features_cmf6 = ["CMF6_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
+    # using current CMF and delta roll
+    features_cmf1 = ["CMF1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
+    features_cmf2 = ["CMF2", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
+    features_cmf3 = ["CMF3", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
+    features_cmf4 = ["CMF4", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
+    features_cmf5 = ["CMF5", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
+    features_cmf6 = ["CMF6", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
     
-    
+    # # # using current CMF and pct roll
+    # features_cmf1 = ["CMF1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
+    # features_cmf2 = ["CMF2", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
+    # features_cmf3 = ["CMF3", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
+    # features_cmf4 = ["CMF4", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
+    # features_cmf5 = ["CMF5", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
+    # features_cmf6 = ["CMF6", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
+
     # Create a mapping from CMF number to its feature set.
     features_by_cmf = {
         1: features_cmf1,
@@ -453,3 +489,4 @@ def train_six_cmf_models(data_file):
 if __name__ == "__main__":
     data = "vix_pkg/data/vix_features_calculated.xlsx"
     train_six_cmf_models(data)
+# %%
