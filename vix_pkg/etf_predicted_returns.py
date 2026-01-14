@@ -32,6 +32,12 @@ def predict_vix_etf_next_day_returns(cmf_predictions):
     cmf_predictions['Pred_VIXM'] = 1 * (cmf_predictions['Pred_CMF4'] * vixm_weights['month 4'] + cmf_predictions['Pred_CMF5'] * vixm_weights['month 5'] + cmf_predictions['Pred_CMF6'] * vixm_weights['month 6'])
     return cmf_predictions, cmf_predictions.loc[0, "Date"], cmf_predictions.loc[len(cmf_predictions)-1, "Date"]
 
+def get_vix_prices_cboe(start_date, end_date):
+    vix = pd.read_csv("vix_pkg/data/VIX_History.csv")
+    vix = vix[['DATE', 'CLOSE']].rename(columns={'DATE': 'Date', 'CLOSE': 'VIX'})
+    vix['Date'] = pd.to_datetime(vix['Date'], format='%m/%d/%Y')
+    vix = vix.set_index('Date')
+    return vix
 
 def read_etf_prices():
     etf_prices = pd.read_excel('vix_pkg/data/etf_prices.xlsx').drop(columns=['^XIV', 'SVXY', 'VXX', 'VXZ'])
@@ -159,7 +165,7 @@ def plot_etfs_vs_vix(results, df, initial_capital=100000):
                         fontsize=10)
     
     plt.tight_layout()
-    plt.savefig('charts/etfs_vs_vix.png', dpi=300)
+    plt.savefig('etfs_vs_vix.png', dpi=300)
     plt.show()
 
 def volatility_weighted_position_sizing(df, capital):
@@ -221,7 +227,7 @@ def apply_scaled_drawdown_constraint(df, max_drawdown_threshold=-0.2, full_risk_
     return df.drop(columns=['Running_Max', 'Drawdown'])
 
 
-def apply_max_drawdown_constraint(df, max_drawdown_threshold=-0.2):
+def apply_max_drawdown_constraint(df, max_drawdown_threshold=-1):
     # Ensure the dataframe is sorted by date
     df = df.sort_index()
 
@@ -245,7 +251,8 @@ def apply_max_drawdown_constraint(df, max_drawdown_threshold=-0.2):
     
     return df
 
-def get_daily_sizing():
+
+if __name__ == "__main__":
     cmf_predictions = preprocess_predictions()
 
     #SVIX is -1x Short VIX short-term futures contracts CMF 1-2
@@ -301,18 +308,17 @@ def get_daily_sizing():
     
     
     etf_predictions = etf_predictions.set_index("Date")
+    vix = get_vix_prices_cboe(start_date, end_date)
+    etf_predictions = pd.merge(etf_predictions, vix, on="Date", how="left")
     
     capital = 100000
     
-    
+    print(etf_predictions)
+    print(etf_predictions['Return'].sum())
+    exit()
     etf_predictions = volatility_weighted_position_sizing(etf_predictions, capital)
     etf_predictions = apply_scaled_drawdown_constraint(etf_predictions, max_drawdown_threshold=-0.2)
-    
-    sizing = etf_predictions[['Top_ETF','Long Pos Notional', 'Bottom_ETF', 'Short Pos Notional']]
-    
-    daily_sizing = sizing.tail(1)
-    
-    daily_sizing['Top_ETF'] = daily_sizing['Top_ETF'].str.replace('Pred_', '', regex=False)
-    daily_sizing['Bottom_ETF'] = daily_sizing['Bottom_ETF'].str.replace('Pred_', '', regex=False)
 
-    return daily_sizing
+    print_performance_metrics(etf_predictions)
+    plot_etfs_vs_vix(etf_predictions, etf_predictions, initial_capital=100000)
+

@@ -2,6 +2,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as ticker
 from pathlib import Path
 
 
@@ -53,6 +55,14 @@ prices = pd.read_excel(PRICE_FILE, parse_dates=["Date"])
 prices = prices[["Date", "SPVXSP","SPVIX2ME","SPVIX3ME", "SPVIX4ME","SPVXMP","SPVIX6ME"]].dropna()
 
 df = (pred.merge(prices, on="Date", how="inner").set_index("Date").sort_index())
+
+# load and prepare VIX Index data for comparison
+vix_data = pd.read_excel(PRICE_FILE, parse_dates=["Date"])
+vix_data = vix_data[["Date", "VIX Index"]].dropna().set_index("Date")
+
+# cmpute cumulative log returns of the VIX Index
+vix_log_returns = np.log(vix_data["VIX Index"]).diff().fillna(0)
+vix_cum_log_returns = vix_log_returns.cumsum()
 
 #  daily ETF returns 
 etf_cols = ["SPVXSP","SPVIX2ME","SPVIX3ME", "SPVIX4ME","SPVXMP","SPVIX6ME"]
@@ -107,6 +117,7 @@ weights    = weights.mul(exposure, axis=0)
 # back-test 
 daily_pnl_log = (weights.shift()*ret).sum(axis=1)        # one-day lag
 log_equity    = daily_pnl_log.cumsum()
+vix_cum_log_returns = vix_cum_log_returns.reindex(log_equity.index).fillna(method='ffill') # Align VIX cumulative log returns with the strategy log equity dates
 start_capital = 100000.0                                # initial NAV
 NAV           = start_capital * np.exp(log_equity)       # convert log-P&L
 nav           = NAV                                      # alias the same series
@@ -143,14 +154,48 @@ def pretty(series):
     out["Trade Days"]       = f"{series['Trade Days']:,.0f}"
     return out
 
-plt.figure(figsize=(10, 5))
-plt.plot(log_equity, linewidth=1.2)
-plt.title("Cumulative Log-Return of Long/Short VIX ETF Strategy")
-plt.xlabel("Date")
-plt.ylabel("Cumulative log-return")
-plt.grid(True)
+# plt.figure(figsize=(10, 5))
+# plt.plot(log_equity, linewidth=1.2)
+# plt.title("Cumulative Log-Return of Long/Short VIX Strategy")
+# plt.xlabel("Date")
+# plt.ylabel("Cumulative log-return")
+# plt.grid(True)
+# plt.tight_layout()
+# plt.show()
+
+# === Compute 90-day rolling Sharpe ratio ===
+window = 90
+rolling_sharpe = daily_pnl_log.rolling(window).mean() / daily_pnl_log.rolling(window).std()
+# rolling_sharpe *= np.sqrt(252)  # annualize
+
+# === Plot cumulative log-returns and rolling Sharpe ===
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+
+# --- Top Plot: Cumulative Log-Returns ---
+ax1.plot(log_equity.index, log_equity.values, color='blue', linewidth=1.5, label='Strategy Cumulative Log-Return')
+ax1.plot(vix_cum_log_returns.index, vix_cum_log_returns.values, color='red', linewidth=1.2, alpha=0.7, label='VIX Cumulative Log-Return (Benchmark)')
+
+ax1.set_ylabel('Cumulative Log-Return', fontsize=12)
+ax1.set_title("Strategy vs. VIX Index (Cumulative Log-Returns)", fontsize=15)
+ax1.legend(fontsize=11)
+ax1.grid(True, alpha=0.3)
+ax1.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+
+# --- Bottom Plot: Rolling Sharpe Ratio ---
+ax2.plot(rolling_sharpe.index, rolling_sharpe.values, linestyle='--', color='green', label='90-Day Rolling Sharpe')
+ax2.axhline(0, color='gray', linewidth=1, linestyle='--', alpha=0.5)
+
+ax2.set_ylabel('Sharpe Ratio', fontsize=12)
+ax2.set_xlabel('Date', fontsize=12)
+ax2.set_title("Rolling 90-Day Sharpe Ratio ", fontsize=14)
+ax2.legend(fontsize=11)
+ax2.grid(True, alpha=0.3)
+ax2.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+
+# --- Final Layout ---
 plt.tight_layout()
 plt.show()
+
 
 print("\n=== Strategy Performance Summary ===")
 print(pretty(summary))

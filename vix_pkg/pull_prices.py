@@ -20,6 +20,11 @@ INDEX_TICKERS = [
     "SPVIX2ME", "SPVIX3ME", "SPVIX4ME",
     "SPVIX6ME", "SPVXMP", "SPVXSP"
 ]
+REF_MAP = {
+    "SPY": "SPY",
+    "TLT": "TLT",
+    "VIX Index": "^VIX",
+}
 ETF_TICKERS = [
     "IAU", "SVIX", "SVXY", "UVXY", "VIXM", "VXX", "VXZ"
 ]
@@ -29,22 +34,44 @@ VIX_PATH = DATA_DIR / "vixprices.xlsx"
 ETF_PATH = DATA_DIR / "etf_prices.xlsx"
 
 # ─── Helpers ────────────────────────────────────────────────────────────
-def fetch_latest_closes(tickers: list[str], add_caret: bool = False) -> pd.Series:
-    """Return latest close for each ticker plus 'Date' (as datetime.date)."""
-    closes: dict[str, float] = {}
-    latest_date: datetime.date | None = None
+def fetch_cmf_prices(tickers, out_path):
+    # Load existing data if available
+    try:
+        existing = pd.read_excel(out_path, parse_dates=["Date"])
+        last_date = existing["Date"].max()
+    except FileNotFoundError:
+        existing = pd.DataFrame()
+        last_date = None
 
-    for tk in tickers:
-        yf_symbol = "^" + tk if add_caret else tk
-        hist = yf.Ticker(yf_symbol).history(period="5d", interval="1d")["Close"].dropna()
-        if hist.empty:
-            raise ValueError(f"No recent data for {tk}")
-        closes[tk] = float(hist.iloc[-1])
-        latest_date = hist.index[-1].date()
-        print(f"Close for {tk} is {closes[tk]} on {latest_date}")
+    # Determine start date for new data
+    if last_date is not None:
+        start_date = (last_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    else:
+        start_date = "2000-01-01"  # or earliest date you want
 
-    closes["Date"] = latest_date
-    return pd.Series(closes)
+    end_date = datetime.now().strftime("%Y-%m-%d")
+
+    # Download missing data for each ticker
+    new_data = pd.DataFrame()
+    for ticker in tickers:
+        df = yf.download(ticker, start=start_date, end=end_date)["Close"]
+        new_data[ticker] = df
+
+    new_data.index = pd.to_datetime(new_data.index)
+    new_data.reset_index(inplace=True)
+    new_data.rename(columns={"index": "Date"}, inplace=True)
+
+    # Merge with existing data, avoiding duplicates
+    if not existing.empty:
+        combined = pd.concat([existing, new_data], ignore_index=True)
+        combined = combined.drop_duplicates(subset=["Date"], keep="last")
+    else:
+        combined = new_data
+
+    # Reorder columns
+    combined = combined[["Date"] + tickers]
+    combined.sort_values("Date", inplace=True)
+    combined.to_excel(out_path, index=False)
 
 def upsert_row(series: pd.Series, path: Path, tickers: list[str]) -> None:
     """Insert `series` at top (row 2) of Excel sheet; replace if date exists."""

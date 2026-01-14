@@ -55,7 +55,7 @@ def walk_forward_train_cmf(
     final_date = df_sorted[date_col].max()
     
     # Initialize a single model with warm_start
-    model = ElasticNet(alpha=0.001,
+    model = ElasticNet(alpha = 0.001 if cmf_id <= 4 else 0.0003,
                        l1_ratio=0.5,      # Lasso-like
                        warm_start=True,
                        max_iter=1000,
@@ -118,13 +118,17 @@ def walk_forward_train_cmf(
         X_val      = X_val[val_mask]
         y_val      = y_val[val_mask]
 
-       
-         
+       # --- BEFORE fit: sanity of targets/features ---
+        print(f"[TRAIN CMF{cmf_id}] y_train mean={float(y_train.mean()):.6e} std={float(y_train.std()):.6e} n={len(y_train)}")
+        print(f"[TRAIN CMF{cmf_id}] X_train shape={X_train.shape}")
+        # warn if target nearly constant
+        if float(y_train.std()) < 1e-6:
+            print(f"[WARN CMF{cmf_id}] y_train ~ constant; model will collapse to intercept.")
+            
         # Fit scaler on train, transform train & val
         X_train_scaled = scaler.fit_transform(X_train)
         X_val_scaled = scaler.transform(X_val)
         
-
         # ----- 3) Fit the model in two steps: train => validate -----
         # Weighted training to emphasize more recent data
         train_dates = df_train[date_col]
@@ -140,7 +144,19 @@ def walk_forward_train_cmf(
         # Fine-tune on validation
         # model.fit(X_combined, y_combined, sample_weight=sample_weights_combined)
         model.fit(X_combined, y_combined)
-  
+
+        # --- AFTER fit: model richness ---
+        if hasattr(model, "coef_"):
+            w = np.asarray(model.coef_).ravel()
+            nz = int(np.count_nonzero(w))
+            print(f"[POST-FIT CMF{cmf_id}] nz={nz}/{len(w)}  L1={float(np.abs(w).sum()):.3e}  L2={float(np.linalg.norm(w)):.3e}  intercept={float(getattr(model,'intercept_',0.0)):.6e}")
+        elif hasattr(model, "feature_importances_"):
+            imp = np.asarray(model.feature_importances_).ravel()
+            nz = int(np.count_nonzero(imp))
+            print(f"[POST-FIT CMF{cmf_id}] importances nz={nz}/{len(imp)} sum={float(imp.sum()):.3f}")
+        else:
+            print(f"[POST-FIT CMF{cmf_id}] model type {type(model).__name__} (no linear coefs/importances)")
+
         # ----- 4) Evaluate on that fold's test set and accumulate predictions -----
         if not df_test.empty and not df_test.isnull().values.any():
             X_test = df_test[feature_cols].values
@@ -231,10 +247,10 @@ def train_six_cmf_models(data_file):
         df[f"CMF{i}_Lag1"] = df[f"CMF{i}"].shift(1)
 
 
-    # # 2. Term-structure features based on *lagged* levels
-    # for k in (2, 3, 4, 5, 6):
-    #     df[f"Delta_Roll_{k}"] = df["CMF1_Lag1"] - df[f"CMF{k}_Lag1"]
-    #     df[f"Pct_Roll_{k}"]   = df[f"CMF{k}_Lag1"] / df["CMF1_Lag1"] - 1
+    # 2. Term-structure features based on *lagged* levels
+    for k in (2, 3, 4, 5, 6):
+        df[f"Delta_Roll_{k}"] = df["CMF1_Lag1"] - df[f"CMF{k}_Lag1"]
+        df[f"Pct_Roll_{k}"]   = df[f"CMF{k}_Lag1"] / df["CMF1_Lag1"] - 1
 
     # # 3. Drop same-day CMF levels – they would leak today’s hierarchy
     # # original CMF1-6 columns leak the intraday hierachy
@@ -264,11 +280,13 @@ def train_six_cmf_models(data_file):
         
 
     if leak_cols:
-        print("🚫  Dropping leaky columns:", leak_cols)
+        print("[WARN]  Dropping leaky columns:", leak_cols)
         df.drop(columns=leak_cols, inplace=True)
+        print(f" Dropped {len(leak_cols)} highly correlated features: {leak_cols}")
+
     # --------------------------------------------------------------
     
-    # # using lagged CMF and delta roll
+    # # # using lagged CMF and delta roll
     # features_cmf1 = ["CMF1_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
     # features_cmf2 = ["CMF2_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
     # features_cmf3 = ["CMF3_Lag1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
@@ -284,14 +302,14 @@ def train_six_cmf_models(data_file):
     # features_cmf5 = ["CMF5_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
     # features_cmf6 = ["CMF6_Lag1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
     
-    # using current CMF and delta roll
+    # # using current CMF and delta roll
     features_cmf1 = ["CMF1", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
     features_cmf2 = ["CMF2", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
     features_cmf3 = ["CMF3", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF3_02"]
     features_cmf4 = ["CMF4", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF4_02"]
-    features_cmf5 = ["CMF5", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF5_02"]
-    features_cmf6 = ["CMF6", "Delta_Roll_3", "Delta_Roll_4", "Delta_Roll_5", "Delta_Roll_6", "Delta_Roll_2", "TLT US Equity", "deltalag_CMF6_02"]
-    
+    # AFTER (surgical)
+    features_cmf5 = ["CMF5_Lag1","Delta_Roll_3","Delta_Roll_4","Delta_Roll_5","Delta_Roll_6","Delta_Roll_2","TLT US Equity","deltalag_CMF5_02"]
+    features_cmf6 = ["CMF6_Lag1","Delta_Roll_3","Delta_Roll_4","Delta_Roll_5","Delta_Roll_6","Delta_Roll_2","TLT US Equity","deltalag_CMF6_02"]
     # # # using current CMF and pct roll
     # features_cmf1 = ["CMF1", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF1_02"]
     # features_cmf2 = ["CMF2", "Pct_Roll_3", "Pct_Roll_4", "Pct_Roll_5", "Pct_Roll_6", "Pct_Roll_2", "TLT US Equity", "deltalag_CMF2_02"]
@@ -362,19 +380,19 @@ def train_six_cmf_models(data_file):
     # Confirms that every CMF model produced predictions for the period we expect, If the start date is much later than the raw file suggests, something upstream is still filtering data away.
     print(
         "OOS date range:",
-        final_df["Date"].min().date(), "→", final_df["Date"].max().date(),
+        final_df["Date"].min().date(), "->", final_df["Date"].max().date(),
         f"({len(final_df):,} rows)")
 
     #  DUPLICATE-COLUMN / NAN SCAN 
     dup_cols = [c for c in final_df.columns if c.endswith(("_x", "_y"))]
     if dup_cols:
-        print("⚠️  Duplicate columns created by outer-merge:", dup_cols)
+        print("[WARN]  Duplicate columns created by outer-merge:", dup_cols)
 
     # Every date should have *exactly one* row per CMF in each fold;
     # if NaNs appear here, the outer merge was sparse.
     # Computes the percentage of missing values in every column, then prints only those ≥ 10 %
     nan_frac = final_df.isna().mean().round(3)
-    print("Fraction NaNs per column ≥0.10:\n",
+    print("Fraction NaNs per column >=0.10:\n",
           nan_frac[nan_frac >= 0.10])
 
     # Reshape to long form  ➜  Date | CMF_ID | Act | Pred
@@ -442,7 +460,7 @@ def train_six_cmf_models(data_file):
                                 .corr(g["Act"].rank(), method="spearman"))
                .mean()
     )
-    print(f"Baseline IC (rank by Act_{chr(0x0394)}-1 only): {baseline_ic:.3f}")
+    print(f"Baseline IC (rank by Act_lag1-1 only): {baseline_ic:.3f}")
 
     # B) Shuffle test: randomly permute predictions (should → ~0)
     shuffled = long_df.copy()
